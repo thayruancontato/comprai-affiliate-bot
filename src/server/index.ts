@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import * as dotenv from 'dotenv';
 import cron from 'node-cron';
-import { whatsappClient, sendGroupMessage } from './services/whatsapp';
+import { whatsappClient, sendGroupMessage, restartWhatsApp } from './services/whatsapp';
 import { searchProducts } from './services/mercadolivre';
 import { buildWhatsAppPost } from './services/post-builder';
 import { redis } from './services/redis';
@@ -18,17 +18,24 @@ app.use(express.static(path.join(__dirname, '../../dashboard/dist')));
 
 const PORT = process.env.PORT || 3000;
 
-// Inicializa cliente WA
-whatsappClient.initialize();
-
 // API STATUS
 app.get('/api/status', (req, res) => {
-  // Integramos com o estado real do bot no whatsapp.ts
   const statusInfo = {
     status: (global as any).waStatus || 'INICIALIZANDO',
     qr: (global as any).waQRCode || null
   };
   res.json(statusInfo);
+});
+
+// NOVO: API RESTART WHATSAPP
+app.post('/api/whatsapp/restart', async (req, res) => {
+  try {
+    console.log('[API] Solicitado reinício manual do WhatsApp...');
+    await restartWhatsApp();
+    res.json({ success: true, message: 'Bot reiniciado com sucesso' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // API GRUPOS
@@ -69,8 +76,6 @@ app.post('/api/queue', async (req, res) => {
 app.delete('/api/queue/:index', async (req, res) => {
   const index = parseInt(req.params.index);
   try {
-    // Truque simples para remover por index no Redis (LSET para valor especial e LREM)
-    // Para MVP, pegaremos a lista, removeremos e salvaremos denovo
     const list = await redis.lrange('ML_OFERTAS_QUEUE', 0, -1);
     list.splice(index, 1);
     await redis.del('ML_OFERTAS_QUEUE');
@@ -106,7 +111,7 @@ app.post('/test-post', async (req, res) => {
   }
 });
 
-// CRON JOB: Roda todo dia em horários comerciais para postar automaticamente o que estiver na fila
+// CRON JOB
 cron.schedule('*/30 * * * *', async () => {
   console.log('[CRON] Verificando fila de postagens...');
   try {

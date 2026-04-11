@@ -1,4 +1,4 @@
-import { Client, LocalAuth, RemoteAuth, MessageMedia } from 'whatsapp-web.js';
+import { Client, RemoteAuth, MessageMedia } from 'whatsapp-web.js';
 import { UpstashRedisStore } from './upstash-store';
 import * as fs from 'fs';
 import { exec } from 'child_process';
@@ -10,73 +10,108 @@ dotenv.config();
  * Usamos RemoteAuth + Upstash Redis para que o login não seja perdido no Render.
  */
 
-// Singleton do Cliente
 const store = new UpstashRedisStore();
+let watchdogTimer: NodeJS.Timeout | null = null;
 
-export const whatsappClient = new Client({
-  authStrategy: new RemoteAuth({
-    clientId: 'compraki-bot',
-    store: store as any,
-    backupSyncIntervalMs: 600000, // 10 min
-  }),
-  puppeteer: {
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-  }
-});
+export let whatsappClient: Client;
 
-let isReady = false;
-
-// Eventos de Autenticação
-whatsappClient.on('qr', (qr) => {
-  console.log('WhatsApp Bot: QR Code recebido. Pronto para escanear.');
-  (global as any).waStatus = 'AGUARDANDO QR';
-  (global as any).waQRCode = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`;
+export function initializeWhatsApp() {
+  console.log('[WhatsApp] Inicializando cliente...');
   
-  const html = `
-    <html>
-      <body style="background:#0a0a0c;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;color:white;font-family:sans-serif;">
-        <div style="text-align:center;background:white;padding:30px;border-radius:10px;box-shadow:0 4px 10px rgba(0,0,0,0.1);">
-          <h2 style="color:#333">Escaneie para iniciar o Bot</h2>
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(qr)}" alt="QR Code" />
-          <p style="color:#666;margin-top:20px;">Use o WhatsApp do seu celular para escanear.</p>
-        </div>
-      </body>
-    </html>
-  `;
-  fs.writeFileSync('qrcode.html', html);
-  exec('start qrcode.html'); 
-});
+  whatsappClient = new Client({
+    authStrategy: new RemoteAuth({
+      clientId: 'compraki-bot',
+      store: store as any,
+      backupSyncIntervalMs: 600000, // 10 min
+    }),
+    puppeteer: {
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+    }
+  });
 
-whatsappClient.on('ready', () => {
-  console.log('WhatsApp Bot: Cliente conectado e pronto!');
-  isReady = true;
-  (global as any).waStatus = 'CONECTADO';
-  (global as any).waQRCode = null;
-});
+  setupEventListeners();
+  whatsappClient.initialize().catch(err => {
+    console.error('[WhatsApp] Erro na inicialização fatal:', err);
+  });
+}
 
-whatsappClient.on('remote_session_saved', () => {
-  console.log('WhatsApp Bot: Sessão remota salva com sucesso no Upstash Redis!');
-});
+function setupEventListeners() {
+  whatsappClient.on('qr', (qr) => {
+    console.log('[WhatsApp] Novo QR Code gerado.');
+    (global as any).waStatus = 'AGUARDANDO QR';
+    (global as any).waQRCode = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`;
+    
+    // Inicia/Reinicia o watchdog sempre que um novo QR chega
+    resetWatchdog();
+  });
 
-whatsappClient.on('authenticated', () => {
-    console.log('WhatsApp Bot: Autenticado com sucesso');
+  whatsappClient.on('ready', () => {
+    console.log('[WhatsApp] Cliente conectado e pronto!');
+    (global as any).waStatus = 'CONECTADO';
+    (global as any).waQRCode = null;
+    stopWatchdog();
+  });
+
+  whatsappClient.on('authenticated', () => {
+    console.log('[WhatsApp] Autenticado com sucesso.');
     (global as any).waStatus = 'AUTENTICADO';
-});
+  });
 
-whatsappClient.on('auth_failure', () => {
-    console.error('WhatsApp Bot: Falha na autenticação');
+  whatsappClient.on('auth_failure', () => {
+    console.error('[WhatsApp] Falha na autenticação.');
     (global as any).waStatus = 'ERRO DE SESSÃO';
-});
+    restartWhatsApp(); // Tenta recuperar automaticamente
+  });
 
-whatsappClient.on('disconnected', () => {
-    console.log('WhatsApp Bot: Cliente desconectado');
+  whatsappClient.on('disconnected', (reason) => {
+    console.log('[WhatsApp] Cliente desconectado:', reason);
     (global as any).waStatus = 'DESCONECTADO';
-    isReady = false;
-});
+    restartWhatsApp();
+  });
+
+  whatsappClient.on('remote_session_saved', () => {
+    console.log('[WhatsApp] Sessão remota salva com sucesso no Redis!');
+  });
+}
+
+function resetWatchdog() {
+  stopWatchdog();
+  // Se em 5 minutos não conectar depois de gerar o QR, reinicia o processo
+  watchdogTimer = setTimeout(() => {
+    if ((global as any).waStatus === 'AGUARDANDO QR') {
+      console.warn('[WhatsApp] Watchdog: QR Code expirou ou demorou demais. Reiniciando...');
+      restartWhatsApp();
+    }
+  }, 300000); // 5 min
+}
+
+function stopWatchdog() {
+  if (watchdogTimer) {
+    clearTimeout(watchdogTimer);
+    watchdogTimer = null;
+  }
+}
+
+export async function restartWhatsApp() {
+  console.log('[WhatsApp] Reiniciando serviço...');
+  (global as any).waStatus = 'REINICIANDO';
+  
+  try {
+    if (whatsappClient) {
+      await whatsappClient.destroy().catch(() => {});
+    }
+  } catch (e) {
+    console.warn('[WhatsApp] Erro ao destruir cliente:', e);
+  }
+
+  initializeWhatsApp();
+}
 
 export async function sendGroupMessage(groupId: string, text: string, imageUrl?: string) {
-  if (!isReady) throw new Error('WhatsApp Bot ainda não está pronto');
+  if ((global as any).waStatus !== 'CONECTADO') {
+     throw new Error('WhatsApp Bot ainda não está pronto ou conectado');
+  }
 
   try {
     if (imageUrl) {
@@ -95,3 +130,6 @@ export async function sendGroupMessage(groupId: string, text: string, imageUrl?:
     throw error;
   }
 }
+
+// Inicialização inicial
+initializeWhatsApp();
