@@ -15,12 +15,23 @@ let watchdogTimer: NodeJS.Timeout | null = null;
 // ===================== EMISSÃO DE STATUS EM TEMPO REAL =====================
 function emitStatus(status: string, qr: string | null = null, pairingCode: string | null = null) {
   (global as any).waStatus = status;
-  (global as any).waQRCode = qr;
-  (global as any).waPairingCode = pairingCode;
+  // Só atualiza QR e Pairing se eles não forem nulos, ou se o status for especificamente de limpeza
+  if (qr !== null) (global as any).waQRCode = qr;
+  if (pairingCode !== null) (global as any).waPairingCode = pairingCode;
+  
+  // Limpa códigos em casos de conexão ou erro fatal para evitar confusão
+  if (status === 'CONECTADO' || status === 'DESLOGADO' || status === 'ERRO FATAL') {
+    (global as any).waQRCode = null;
+    (global as any).waPairingCode = null;
+  }
 
   const io = (global as any).io;
   if (io) {
-    io.emit('wa_status', { status, qr, pairingCode });
+    io.emit('wa_status', { 
+      status, 
+      qr: (global as any).waQRCode, 
+      pairingCode: (global as any).waPairingCode 
+    });
     console.log(`[Baileys] Status: ${status}${pairingCode ? ` | Código: ${pairingCode}` : ''}`);
   }
 }
@@ -119,15 +130,16 @@ export async function initializeWhatsApp(phoneNumber?: string) {
   // 4. Se temos um número de telefone E não estamos registrados, usar Pairing Code
   if (phoneNumber && !sock.authState.creds.registered) {
     try {
-      // Aguardar o socket estar pronto para solicitar o código
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Aguardar o socket estar totalmente pronto e estabilizado
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      console.log(`[Baileys] Solicitando código de pareamento para ${phoneNumber}...`);
       const code = await sock.requestPairingCode(phoneNumber);
       const formattedCode = code?.match(/.{1,4}/g)?.join('-') || code;
       console.log(`[Baileys] 🔑 CÓDIGO DE PAREAMENTO: ${formattedCode}`);
       emitStatus('AGUARDANDO CÓDIGO', null, formattedCode);
     } catch (err: any) {
       console.error('[Baileys] Erro ao solicitar pairing code:', err.message);
-      // Fallback: continua com QR Code
+      // Fallback: continua com QR Code se falhar feio
     }
   }
 
@@ -143,7 +155,7 @@ export async function initializeWhatsApp(phoneNumber?: string) {
     const { connection, lastDisconnect, qr } = update;
     console.log('[Baileys] connection.update:', JSON.stringify({ connection, qr: !!qr }));
 
-    // Se estamos no modo Pairing Code, ignorar QR codes
+    // Se estamos no modo Pairing Code, ignoramos a emissão de QR para não sobrescrever o status na UI
     if (qr && !phoneNumber) {
       console.log('[Baileys] QR Code gerado.');
       try {
