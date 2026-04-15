@@ -10,6 +10,24 @@ dotenv.config();
 const ML_WORKER_URL = process.env.ML_WORKER_URL || 'https://compraki-ml-bridge.thayrufino2.workers.dev';
 const TRACKING_ID = process.env.ML_AFFILIATE_TRACKING_ID || '';
 
+const DISCOVERY_TERMS = [
+  'ofertas do dia',
+  'mais vendidos',
+  'promoção relampago',
+  'eletronicos em oferta',
+  'cozinha em promoção',
+  'setup gamer barato',
+  'smartwatch promoção',
+  'fones de ouvido bluetooth',
+  'casa inteligente oferta',
+  'ferramentas promoção'
+];
+
+export async function getRandomProducts() {
+  const query = DISCOVERY_TERMS[Math.floor(Math.random() * DISCOVERY_TERMS.length)];
+  return await searchProducts(query, 20);
+}
+
 export async function searchProducts(query: string, limit = 5) {
   console.log(`[ML Worker] Buscando: "${query}" (limite: ${limit})...`);
 

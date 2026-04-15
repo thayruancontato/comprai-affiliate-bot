@@ -6,7 +6,7 @@ import compression from 'compression';
 import * as dotenv from 'dotenv';
 import cron from 'node-cron';
 import { sendGroupMessage, restartWhatsApp, initializeWhatsApp, getGroups } from './services/whatsapp';
-import { searchProducts } from './services/mercadolivre';
+import { searchProducts, getRandomProducts } from './services/mercadolivre';
 import { buildWhatsAppPost } from './services/post-builder';
 import { redis } from './services/redis';
 import path from 'path';
@@ -139,6 +139,29 @@ app.post('/test-post', async (req, res) => {
     if (items.length === 0) return res.status(404).json({ error: 'Nenhum produto encontrado' });
     const text = buildWhatsAppPost(items[0], 'A');
     await sendGroupMessage(groupId, text, items[0].thumbnail);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DESCOBERTA DE OFERTAS ALEATÓRIAS
+app.get('/api/discover', async (req, res) => {
+  try {
+    const products = await getRandomProducts();
+    res.json({ products });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POSTAGEM DIRETA DE UM PRODUTO ESPECÍFICO
+app.post('/api/post-direct', async (req, res) => {
+  const { product, groupId } = req.body;
+  if (!product || !groupId) return res.status(400).json({ error: 'Faltando produto ou groupId' });
+  try {
+    const text = buildWhatsAppPost(product, 'A');
+    await sendGroupMessage(groupId, text, product.thumbnail);
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
