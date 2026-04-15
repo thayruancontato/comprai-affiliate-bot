@@ -61,13 +61,18 @@ async function saveSessionToRedis() {
 
 async function restoreSessionFromRedis() {
   try {
-    const data = await redis.get<string>(SESSION_KEY);
-    if (!data) {
+    const rawData = await redis.get<any>(SESSION_KEY);
+    if (!rawData) {
       console.log('[Baileys] Nenhuma sessão no Redis. Login novo necessário.');
       return;
     }
 
-    const sessionData: Record<string, string> = JSON.parse(data);
+    let sessionData: Record<string, string>;
+    if (typeof rawData === 'object' && rawData !== null) {
+      sessionData = rawData;
+    } else {
+      sessionData = JSON.parse(rawData);
+    }
 
     if (!fs.existsSync(AUTH_DIR)) {
       fs.mkdirSync(AUTH_DIR, { recursive: true });
