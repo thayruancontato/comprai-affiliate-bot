@@ -77,15 +77,17 @@ export async function initializeWhatsApp() {
   emitStatus('INICIALIZANDO');
 
   // Import dinâmico do Baileys (ESM)
+  const baileys = await import('@whiskeysockets/baileys');
+  const makeWASocket = baileys.default;
   const {
-    default: makeWASocket,
     DisconnectReason,
     useMultiFileAuthState,
     fetchLatestBaileysVersion,
-    makeCacheableSignalKeyStore
-  } = await import('@whiskeysockets/baileys');
+    makeCacheableSignalKeyStore,
+    Browsers
+  } = baileys;
   const pino = (await import('pino')).default;
-  const logger = pino({ level: 'silent' });
+  const logger = pino({ level: 'warn' }); // warn para ver erros importantes
 
   // 1. Restaurar sessão do Redis
   await restoreSessionFromRedis();
@@ -95,9 +97,10 @@ export async function initializeWhatsApp() {
     fs.mkdirSync(AUTH_DIR, { recursive: true });
   }
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-  const { version } = await fetchLatestBaileysVersion();
+  const { version, isLatest } = await fetchLatestBaileysVersion();
+  console.log(`[Baileys] Usando WA v${version.join('.')} (latest: ${isLatest})`);
 
-  // 3. Criar socket
+  // 3. Criar socket com configurações otimizadas para servidor
   sock = makeWASocket({
     version,
     auth: {
@@ -106,23 +109,28 @@ export async function initializeWhatsApp() {
     },
     printQRInTerminal: false,
     logger,
-    browser: ['Compraki Bot', 'Chrome', '120.0.0'],
+    browser: Browsers.ubuntu('Chrome'),  // Fingerprint oficial (mais confiável)
     generateHighQualityLinkPreview: false,
-    syncFullHistory: false
+    syncFullHistory: false,
+    markOnlineOnConnect: false,  // Não marca online ao conectar (reduz carga)
+    connectTimeoutMs: 60000,    // 60s de timeout de conexão
+    qrTimeout: 40000,           // 40s para cada QR antes de gerar novo
   });
 
   // 4. Evento de credenciais
   sock.ev.on('creds.update', async () => {
+    console.log('[Baileys] Credenciais atualizadas. Salvando...');
     await saveCreds();
     await saveSessionToRedis();
   });
 
-  // 5. Evento de conexão
+  // 5. Evento de conexão (com logging detalhado)
   sock.ev.on('connection.update', async (update: any) => {
-    const { connection, lastDisconnect, qr } = update;
+    const { connection, lastDisconnect, qr, receivedPendingNotifications } = update;
+    console.log('[Baileys] connection.update:', JSON.stringify({ connection, qr: !!qr, receivedPendingNotifications }));
 
     if (qr) {
-      console.log('[Baileys] QR Code gerado instantaneamente.');
+      console.log('[Baileys] QR Code gerado.');
       try {
         const qrDataUrl = await QRCode.toDataURL(qr, { width: 300, margin: 2 });
         emitStatus('AGUARDANDO QR', qrDataUrl);
@@ -133,21 +141,31 @@ export async function initializeWhatsApp() {
       resetWatchdog();
     }
 
-    if (connection === 'close') {
-      const reason = (lastDisconnect?.error as Boom)?.output?.statusCode;
-      console.log(`[Baileys] Conexão fechada. Razão: ${reason}`);
+    if (connection === 'connecting') {
+      console.log('[Baileys] Estabelecendo conexão com WhatsApp...');
+      emitStatus('CONECTANDO');
+    }
 
-      if (reason === DisconnectReason.loggedOut) {
-        console.log('[Baileys] Usuário deslogou. Limpando sessão...');
+    if (connection === 'close') {
+      const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+      const errorMsg = (lastDisconnect?.error as Boom)?.message || 'desconhecido';
+      console.log(`[Baileys] Conexão fechada. Status: ${statusCode}, Erro: ${errorMsg}`);
+
+      if (statusCode === DisconnectReason.loggedOut) {
+        console.log('[Baileys] Sessão invalidada. Limpando dados...');
         emitStatus('DESLOGADO');
         if (fs.existsSync(AUTH_DIR)) {
           fs.rmSync(AUTH_DIR, { recursive: true, force: true });
         }
         await redis.del(SESSION_KEY);
-        setTimeout(() => initializeWhatsApp(), 3000);
+        setTimeout(() => initializeWhatsApp(), 5000);
+      } else if (statusCode === 408 || statusCode === 503) {
+        console.log('[Baileys] Timeout/Indisponível. Aguardando 10s antes de reconectar...');
+        emitStatus('RECONECTANDO');
+        setTimeout(() => initializeWhatsApp(), 10000);
       } else {
         emitStatus('RECONECTANDO');
-        setTimeout(() => initializeWhatsApp(), 3000);
+        setTimeout(() => initializeWhatsApp(), 5000);
       }
     }
 
