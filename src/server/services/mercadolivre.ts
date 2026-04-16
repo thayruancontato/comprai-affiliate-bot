@@ -59,10 +59,23 @@ async function getMLToken() {
   }
 }
 
-export async function getRandomProducts() {
-  const query = DISCOVERY_TERMS[Math.floor(Math.random() * DISCOVERY_TERMS.length)];
-  return await searchProducts(query, 15);
+export const CATEGORIES = {
+  'Tudo': 'ofertas do dia',
+  'Eletrônicos': 'eletronicos em oferta',
+  'Gamer': 'setup gamer barato',
+  'Cozinha': 'cozinha em promoção',
+  'Celulares': 'smartphone promoção',
+  'Casa': 'casa inteligente oferta',
+  'Ferramentas': 'ferramentas promoção'
+};
+
+export async function getRandomProducts(category?: string) {
+  const query = category && (CATEGORIES as any)[category] 
+    ? (CATEGORIES as any)[category] 
+    : DISCOVERY_TERMS[Math.floor(Math.random() * DISCOVERY_TERMS.length)];
+  return await searchProducts(query, 16);
 }
+
 
 export async function searchProducts(query: string, limit = 5) {
   console.log(`[ML API] Buscando: "${query}" (limite: ${limit})...`);

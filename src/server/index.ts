@@ -148,12 +148,14 @@ app.post('/test-post', async (req, res) => {
 // DISCOVERY ENDPOINT
 app.get('/api/discover', async (req, res) => {
   try {
-    const products = await getRandomProducts();
+    const { category } = req.query;
+    const products = await getRandomProducts(category as string);
     res.json({ products });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 app.get('/api/debug-html', async (req, res) => {
   try {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { io } from 'socket.io-client';
 import './App.css';
 
@@ -23,17 +23,24 @@ interface Product {
   free_shipping: boolean;
 }
 
-const IS_PROD = true;
-const RENDER_URL = 'https://compraki-bot.onrender.com';
-const API_BASE = IS_PROD ? RENDER_URL : '';
-const SOCKET_URL = IS_PROD ? RENDER_URL : '/';
+const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+  ? '' 
+  : (window.location.origin.includes('pages.dev') ? 'https://compraki-bot.onrender.com' : '');
+
+const SOCKET_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? '/'
+  : (window.location.origin.includes('pages.dev') ? 'https://compraki-bot.onrender.com' : '/');
+
 
 const socket = io(SOCKET_URL, {
   transports: ['websocket'],
   autoConnect: true
 });
 
+const CATEGORIES = ['Tudo', 'Eletrônicos', 'Gamer', 'Celulares', 'Cozinha', 'Casa', 'Ferramentas'];
+
 function App() {
+  const [activeTab, setActiveTab] = useState('vitrine');
   const [waStatus, setWaStatus] = useState<Status>({ status: 'INICIALIZANDO', qr: null, pairingCode: null });
   const [groups, setGroups] = useState<Group[]>([]);
   const [queue, setQueue] = useState<any[]>([]);
@@ -43,10 +50,11 @@ function App() {
   const [restarting, setRestarting] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [pairing, setPairing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('Tudo');
 
   useEffect(() => {
     socket.on('wa_status', (data: Status) => {
-      console.log('[Socket] Status:', data);
       setWaStatus(data);
     });
 
@@ -60,7 +68,6 @@ function App() {
         const statusData = await statusRes.json();
         if (statusData.status === 'CONECTADO') {
           fetchGroups();
-          handleDiscover();
         }
       } catch (err) {
         console.error('Erro ao buscar dados iniciais:', err);
@@ -68,18 +75,15 @@ function App() {
     };
 
     fetchInitialData();
-    // Carrega produtos imediatamente, independente do status do WhatsApp
-    handleDiscover();
+    handleDiscover('Tudo');
 
     const heartbeat = setInterval(async () => {
       try {
         const res = await fetch(`${API_BASE}/api/status`);
         const data = await res.json();
         setWaStatus(data);
-      } catch (err) {
-        console.error('Erro no heartbeat:', err);
-      }
-    }, 10000);
+      } catch (err) {}
+    }, 15000);
 
     return () => {
       socket.off('wa_status');
@@ -87,31 +91,25 @@ function App() {
     };
   }, []);
 
-  useEffect(() => {
-    if (waStatus.status === 'CONECTADO' && groups.length === 0) {
-      fetchGroups();
-      if (discoveredProducts.length === 0) handleDiscover();
-    }
-  }, [waStatus.status]);
-
   const fetchGroups = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/groups`);
       const data = await res.json();
       setGroups(data.groups || []);
-    } catch (err) {
-      console.error('Erro ao buscar grupos:', err);
-    }
+      if (data.groups?.length > 0) setSelectedGroup(data.groups[0].id);
+    } catch (err) {}
   };
 
-  const handleDiscover = async () => {
+  const handleDiscover = async (category: string) => {
     setLoading(true);
+    setSelectedCategory(category);
     try {
-      const res = await fetch(`${API_BASE}/api/discover`);
+      const url = category === 'Tudo' ? `${API_BASE}/api/discover` : `${API_BASE}/api/discover?category=${category}`;
+      const res = await fetch(url);
       const data = await res.json();
       setDiscoveredProducts(data.products || []);
     } catch (err) {
-      alert('Erro ao buscar novas ofertas');
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -127,8 +125,7 @@ function App() {
         body: JSON.stringify({ product, groupId: selectedGroup })
       });
       const data = await res.json();
-      if (data.success) alert('Produto postado com sucesso!');
-      else alert('Erro ao postar');
+      if (data.success) alert('Enviado com sucesso! 🚀');
     } catch (err) {
       alert('Erro na conexão');
     } finally {
@@ -136,197 +133,193 @@ function App() {
     }
   };
 
-  const handlePairWithPhone = async () => {
-    if (!phoneNumber) return alert('Digite seu número com código do país (ex: 5511999998888)');
-    setPairing(true);
-    try {
-      await fetch(`${API_BASE}/api/whatsapp/pair`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phoneNumber })
-      });
-    } catch (err) {
-      alert('Erro ao solicitar código');
-    } finally {
-      setPairing(false);
-    }
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    alert('Link copiado! 🔗');
   };
 
-  const handleRemoveFromQueue = async (index: number) => {
-    try {
-      await fetch(`${API_BASE}/api/queue/${index}`, { method: 'DELETE' });
-      setQueue(prev => prev.filter((_, i) => i !== index));
-    } catch (err) {
-      alert('Erro ao remover da fila');
-    }
-  };
-
-  const handleRestartBot = async () => {
-    if (!confirm('Reiniciar o bot?')) return;
-    setRestarting(true);
-    try {
-      await fetch(`${API_BASE}/api/whatsapp/restart`, { method: 'POST' });
-    } catch (err) {
-      alert('Erro ao reiniciar');
-    } finally {
-      setRestarting(false);
-    }
-  };
-
-  const parseQueueItem = (item: any) => {
-    if (typeof item === 'object') return item;
-    try {
-      return JSON.parse(item);
-    } catch {
-      return { query: String(item) };
-    }
-  };
+  const filteredProducts = useMemo(() => {
+    return discoveredProducts.filter(p => 
+      p.title.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [discoveredProducts, searchQuery]);
 
   return (
-    <div className="container fade-in">
-      <header className="glass-header">
+    <div className="app-layout">
+      <aside className="sidebar">
         <div className="logo-section">
-          <div className="logo-icon">🛒</div>
-          <h1 className="gradient-text">Compraki Bot</h1>
+          <span className="logo-icon">🛒</span>
+          <span className="logo-text">Compraki</span>
         </div>
-        <div className={`status-badge ${waStatus.status === 'CONECTADO' ? 'online' : 'offline'}`}>
-          <span className="dot"></span> {waStatus.status}
-        </div>
-      </header>
 
-      <main className="dashboard-grid">
-        <section className="glass-card whatsapp-section">
-          <div className="card-header">
-            <h2>Conexão WhatsApp</h2>
-            <div className="wa-status-label">{waStatus.status}</div>
+        <nav className="nav-links">
+          <li className={`nav-item ${activeTab === 'vitrine' ? 'active' : ''}`} onClick={() => setActiveTab('vitrine')}>
+            <span className="nav-icon">🛍️</span>
+            <span className="nav-text">Vitrine</span>
+          </li>
+          <li className={`nav-item ${activeTab === 'conexao' ? 'active' : ''}`} onClick={() => setActiveTab('conexao')}>
+            <span className="nav-icon">📱</span>
+            <span className="nav-text">Conexão</span>
+          </li>
+          <li className={`nav-item ${activeTab === 'fila' ? 'active' : ''}`} onClick={() => setActiveTab('fila')}>
+            <span className="nav-icon">⏳</span>
+            <span className="nav-text">Fila Bot</span>
+          </li>
+        </nav>
+
+        <div style={{ marginTop: 'auto' }} className="status-badge-container">
+          <div className={`status-badge ${waStatus.status === 'CONECTADO' ? 'online' : 'offline'}`}>
+            <span className="dot"></span> {waStatus.status}
           </div>
+        </div>
+      </aside>
 
-          <div className="wa-status-container">
-            {waStatus.status === 'CONECTADO' ? (
-              <div className="success-ui fade-in">
-                <div className="check-icon">✓</div>
-                <p>Bot Cloud Conectado</p>
+      <main className="main-content">
+        {activeTab === 'vitrine' && (
+          <div className="marketplace-container fade-in">
+            <header className="page-header">
+              <h2 className="gradient-text">Vitrine de Ofertas</h2>
+              <div className="search-bar">
+                <span>🔍</span>
+                <input 
+                  type="text" 
+                  placeholder="Buscar na vitrine..." 
+                  className="search-input"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
               </div>
-            ) : waStatus.pairingCode ? (
-              <div className="pairing-code-ui fade-in">
-                <p className="pairing-label">Digite este código no WhatsApp:</p>
-                <div className="pairing-code">{waStatus.pairingCode}</div>
-                <p className="pairing-instructions">
-                  📱 No celular: <strong>Configurações → Aparelhos Conectados → Conectar Aparelho → Conectar com número de telefone</strong>
-                </p>
-              </div>
-            ) : waStatus.qr ? (
-              <div className="qr-container fade-in">
-                <p>Escaneie o código (ou use o método por número abaixo):</p>
-                <img src={waStatus.qr} alt="QR Code" className="qr-image" />
-              </div>
-            ) : (
-              <div className="loading-ui fade-in">
-                <div className="spinner"></div>
-                <p>Sincronizando...</p>
-              </div>
-            )}
+            </header>
 
-            {waStatus.status !== 'CONECTADO' && !waStatus.pairingCode && (
-              <div className="pairing-input-section fade-in">
-                <p className="section-label">🔑 Conectar via Número (Recomendado)</p>
-                <div className="pairing-form">
+            <div className="category-chips">
+              {CATEGORIES.map(cat => (
+                <button 
+                  key={cat} 
+                  className={`chip ${selectedCategory === cat ? 'active' : ''}`}
+                  onClick={() => handleDiscover(cat)}
+                  disabled={loading}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+
+            <div className="discovery-header">
+               <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
+                 <span>Postar em:</span>
+                 <select
+                    value={selectedGroup}
+                    onChange={(e) => setSelectedGroup(e.target.value)}
+                    className="glass-select"
+                 >
+                    {groups.map(g => (
+                      <option key={g.id} value={g.id}>{g.name}</option>
+                    ))}
+                  </select>
+               </div>
+               <button className="btn btn-copy" onClick={() => handleDiscover(selectedCategory)} disabled={loading}>
+                 {loading ? 'Sincronizando...' : '🔄 Recarregar'}
+               </button>
+            </div>
+
+            <div className="product-grid">
+              {filteredProducts.map(p => (
+                <div key={p.id} className="product-card">
+                  <div className="p-img-container">
+                    {p.original_price > p.price && (
+                      <div className="p-discount-badge">
+                        -{Math.round((1 - (p.price / p.original_price)) * 100)}%
+                      </div>
+                    )}
+                    <img src={p.thumbnail} alt={p.title} className="p-img" />
+                  </div>
+                  <div className="p-content">
+                    <h3 className="p-title" title={p.title}>{p.title}</h3>
+                    <div className="p-price-box">
+                      {p.original_price > p.price && <span className="p-old-price">R$ {p.original_price.toFixed(2)}</span>}
+                      <span className="p-new-price">R$ {p.price.toFixed(2)}</span>
+                    </div>
+
+                    <div className="action-buttons">
+                      <button className="btn btn-copy" onClick={() => copyToClipboard(p.permalink)}>
+                        🔗 Copiar
+                      </button>
+                      <button 
+                        className="btn btn-share" 
+                        onClick={() => handlePostDirect(p)}
+                        disabled={loading || waStatus.status !== 'CONECTADO'}
+                      >
+                        🚀 Enviar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'conexao' && (
+          <div className="glass-card fade-in" style={{ maxWidth: '600px', margin: '0 auto' }}>
+            <h2>Conexão WhatsApp</h2>
+            <div className="wa-status-container" style={{ marginTop: '20px' }}>
+               {waStatus.status === 'CONECTADO' ? (
+                <div className="success-ui fade-in">
+                  <div className="check-icon">✓</div>
+                  <p>Bot Cloud Conectado</p>
+                </div>
+              ) : waStatus.pairingCode ? (
+                <div className="pairing-code-ui fade-in">
+                  <p className="pairing-label">Digite este código no WhatsApp:</p>
+                  <div className="pairing-code">{waStatus.pairingCode}</div>
+                  <p>📱 Menu → Aparelhos Conectados → Conectar com número</p>
+                </div>
+              ) : waStatus.qr ? (
+                <div className="qr-container fade-in" style={{ textAlign: 'center' }}>
+                  <img src={waStatus.qr} alt="QR Code" style={{ borderRadius: '15px', maxWidth: '300px' }} />
+                </div>
+              ) : (
+                <div className="loading-ui fade-in">Sincronizando...</div>
+              )}
+
+              <hr style={{ margin: '2rem 0', opacity: 0.1 }} />
+              
+              <div className="pairing-form">
                   <input
                     type="tel"
                     placeholder="5511999998888"
                     value={phoneNumber}
                     onChange={(e) => setPhoneNumber(e.target.value)}
                     className="glass-input"
+                    style={{ width: '100%', padding: '15px', borderRadius: '12px', marginBottom: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: 'white' }}
                   />
-                  <button className="btn btn-accent" onClick={handlePairWithPhone} disabled={pairing}>
-                    {pairing ? '...' : '🔗 Gerar Código'}
+                  <button className="btn btn-share" style={{ width: '100%' }} onClick={async () => {
+                    await fetch(`${API_BASE}/api/whatsapp/pair`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ phoneNumber })
+                    });
+                  }}>
+                    🔗 Gerar Código de Pareamento
                   </button>
-                </div>
               </div>
-            )}
-
-            <button className="btn btn-secondary restart-btn" onClick={handleRestartBot} disabled={restarting}>
-              {restarting ? 'Reiniciando...' : '🔄 Reiniciar'}
-            </button>
-          </div>
-        </section>
-
-        <section className="glass-card main-section">
-          <div className="discovery-header">
-            <h2>🚀 Descobrir Ofertas</h2>
-            <div className="discovery-actions">
-              <select
-                value={selectedGroup}
-                onChange={(e) => setSelectedGroup(e.target.value)}
-                className="glass-select"
-              >
-                <option value="">Postar no Grupo...</option>
-                {groups.map(g => (
-                  <option key={g.id} value={g.id}>{g.name}</option>
-                ))}
-              </select>
-              <button 
-                className={`btn btn-primary ${loading ? 'btn-loading' : ''}`} 
-                onClick={handleDiscover}
-                disabled={loading}
-              >
-                {loading ? '🔄 Buscando...' : '🔄 Atualizar Ofertas'}
-              </button>
             </div>
           </div>
+        )}
 
-          <div className="product-feed">
-            {discoveredProducts.length === 0 && !loading && (
-              <div className="empty-feed">
-                <p>Clique em "Atualizar Ofertas" para começar.</p>
-              </div>
-            )}
-
-            <div className="product-grid">
-              {discoveredProducts.map((p) => (
-                <div key={p.id} className="product-card fade-in">
-                  <div className="p-badge">OFERTA</div>
-                  <img src={p.thumbnail} alt={p.title} className="p-img" />
-                  <div className="p-info">
-                    <h3 title={p.title}>{p.title}</h3>
-                    <div className="p-price-row">
-                      <span className="p-price-old">R$ {p.original_price.toFixed(2)}</span>
-                      <span className="p-price-new">R$ {p.price.toFixed(2)}</span>
-                    </div>
-                    <button 
-                      className="btn btn-post"
-                      onClick={() => handlePostDirect(p)}
-                      disabled={loading || !selectedGroup}
-                    >
-                      Mandar p/ Grupo 🚀
-                    </button>
-                  </div>
+        {activeTab === 'fila' && (
+          <div className="glass-card fade-in">
+            <h2>Fila de Automação ({queue.length})</h2>
+            <div className="scroll-area" style={{ marginTop: '20px' }}>
+              {queue.map((item, idx) => (
+                <div key={idx} className="queue-item">
+                   <span>📦 {typeof item === 'string' ? JSON.parse(item).query : item.query}</span>
+                   <button className="btn btn-copy" style={{ color: '#ef4444' }}>🗑️</button>
                 </div>
               ))}
             </div>
           </div>
-        </section>
-
-        <section className="glass-card queue-section-mini">
-          <h3>Fila de Automação ({queue.length})</h3>
-          <div className="scroll-area">
-            {queue.length === 0 ? (
-              <p className="empty-msg">Nenhuma agendada.</p>
-            ) : (
-              <ul>
-                {queue.map((item, idx) => {
-                  const parsed = parseQueueItem(item);
-                  return (
-                    <li key={idx} className="queue-item fade-in">
-                      <span className="q-query">📦 {parsed.query}</span>
-                      <button onClick={() => handleRemoveFromQueue(idx)} className="btn-delete">🗑️</button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        </section>
+        )}
       </main>
     </div>
   );
