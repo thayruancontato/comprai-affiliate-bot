@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "tsx watch src/server/index.ts",
     "start": "node dist/server/index.js",
-    "build": "tsc",
+    "build": "npm run build:all",
     "build:dashboard": "cd dashboard && npm install && npm run build",
-    "build:all": "npm run build:dashboard && npm run build",
+    "build:all": "cd dashboard && npm install && npm run build && tsc",
+
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push"
   },
