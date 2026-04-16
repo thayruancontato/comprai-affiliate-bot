@@ -118,10 +118,11 @@ export async function searchProducts(query: string, limit = 5) {
     console.warn('[ML API] Camada 2 (Direto) falhou:', err.message);
   }
 
-  // CAMADA 3: Cache local curadoria (garantido)
-  console.log('[ML API] Usando curadoria local como última linha de defesa...');
-  return await getLocalFallbackProducts(limit);
+  // Se as duas camadas de scraping falharem, retornamos lista vazia (conforme pedido: sem dados mock)
+  console.log('[ML API] Todas as camadas de scraping falharam.');
+  return [];
 }
+
 
 function parseMLHtml(html: string, limit: number): any[] {
   const $ = cheerio.load(html);
