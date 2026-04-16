@@ -68,6 +68,8 @@ function App() {
     };
 
     fetchInitialData();
+    // Carrega produtos imediatamente, independente do status do WhatsApp
+    handleDiscover();
 
     const heartbeat = setInterval(async () => {
       try {
@@ -266,7 +268,7 @@ function App() {
               <button 
                 className={`btn btn-primary ${loading ? 'btn-loading' : ''}`} 
                 onClick={handleDiscover}
-                disabled={loading || waStatus.status !== 'CONECTADO'}
+                disabled={loading}
               >
                 {loading ? '🔄 Buscando...' : '🔄 Atualizar Ofertas'}
               </button>
@@ -294,7 +296,7 @@ function App() {
                     <button 
                       className="btn btn-post"
                       onClick={() => handlePostDirect(p)}
-                      disabled={loading || waStatus.status !== 'CONECTADO' || !selectedGroup}
+                      disabled={loading || !selectedGroup}
                     >
                       Mandar p/ Grupo 🚀
                     </button>

@@ -1,6 +1,5 @@
 import * as cheerio from 'cheerio';
-import * as fs from 'fs';
-import * as path from 'path';
+import { FALLBACK_PRODUCTS } from './fallback-data';
 
 const ML_APP_ID = process.env.ML_APP_ID || '';
 const ML_SECRET_KEY = process.env.ML_SECRET_KEY || '';
@@ -142,10 +141,7 @@ function parseMLHtml(html: string, limit: number): any[] {
 
 async function getLocalFallbackProducts(limit: number) {
   try {
-    // process.cwd() aponta para a raiz do projeto tanto localmente quanto no Render
-    const fallbackPath = path.join(process.cwd(), 'src/server/fallback_products.json');
-    const data = await fs.promises.readFile(fallbackPath, 'utf8');
-    const products = JSON.parse(data);
+    const products = FALLBACK_PRODUCTS;
     
     // Pick random items to simulate discovery
     const shuffled = products.sort(() => 0.5 - Math.random());

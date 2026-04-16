@@ -1,4 +1,4 @@
-[
+export const FALLBACK_PRODUCTS = [
   {
     "title": "Apple iPhone 13 (128 GB) - Meia-noite",
     "price": "R$ 3.899",
@@ -63,7 +63,7 @@
     "source": "cache-curadoria"
   },
   {
-    "title": "Smartwatch Amazfit GTS 4 Mini GPS Monitor Saúde",
+    "title": "Smartwatch Amazon Amazfit GTS 4 Mini GPS",
     "price": "R$ 499",
     "link": "https://www.mercadolivre.com.br/smartwatch-amazfit-gts-4-mini/p/MLB26285571",
     "thumbnail": "https://images.unsplash.com/photo-1579586337278-3befd40fd17a?w=300&q=80",
@@ -77,7 +77,7 @@
     "source": "cache-curadoria"
   },
   {
-    "title": "Câmera de Segurança Inteli Vision 360° Wi-Fi Full HD",
+    "title": "Câmera de Segurança Inteli Vision 360° Wi-Fi",
     "price": "R$ 189",
     "link": "https://www.mercadolivre.com.br/camera-seguranca-inteli-vision-360-wi-fi/p/MLB22398427",
     "thumbnail": "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=300&q=80",
@@ -91,35 +91,35 @@
     "source": "cache-curadoria"
   },
   {
-    "title": "Cafeteira Expresso De'Longhi Magnifica Evo Automática",
+    "title": "Cafeteira Expresso De'Longhi Magnifica Evo",
     "price": "R$ 3.199",
     "link": "https://www.mercadolivre.com.br/cafeteira-delonghi-magnifica-evo/p/MLB23085794",
     "thumbnail": "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=300&q=80",
     "source": "cache-curadoria"
   },
   {
-    "title": "Teclado Mecânico Gamer Redragon Kumara RGB Switch Red",
+    "title": "Teclado Mecânico Gamer Redragon Kumara RGB",
     "price": "R$ 259",
     "link": "https://www.mercadolivre.com.br/teclado-mecanico-gamer-redragon-kumara-rgb/p/MLB21476988",
     "thumbnail": "https://images.unsplash.com/photo-1541140532154-b024d705b90a?w=300&q=80",
     "source": "cache-curadoria"
   },
   {
-    "title": "Caixa de Som JBL Charge 5 Bluetooth 40W À Prova D'água",
+    "title": "Caixa de Som JBL Charge 5 Bluetooth 40W",
     "price": "R$ 899",
     "link": "https://www.mercadolivre.com.br/jbl-charge-5-bluetooth-40w/p/MLB22015875",
     "thumbnail": "https://images.unsplash.com/photo-1608043152269-423dbba4e7e1?w=300&q=80",
     "source": "cache-curadoria"
   },
   {
-    "title": "Micro-ondas Electrolux 32L MTD42 Branco 110V",
+    "title": "Micro-ondas Electrolux 32L MTD42 Branco",
     "price": "R$ 499",
     "link": "https://www.mercadolivre.com.br/micro-ondas-electrolux-32l-mtd42/p/MLB20012988",
     "thumbnail": "https://images.unsplash.com/photo-1585771724684-38269d6639fd?w=300&q=80",
     "source": "cache-curadoria"
   },
   {
-    "title": "Headset Gamer HyperX Cloud II 7.1 Virtual Surround",
+    "title": "Headset Gamer HyperX Cloud II 7.1 Virtual",
     "price": "R$ 599",
     "link": "https://www.mercadolivre.com.br/headset-hyperx-cloud-ii-71-virtual/p/MLB20264897",
     "thumbnail": "https://images.unsplash.com/photo-1560393464-5c69a73c5770?w=300&q=80",
@@ -139,4 +139,4 @@
     "thumbnail": "https://images.unsplash.com/photo-1612287230202-1ff1d85d1bdf?w=300&q=80",
     "source": "cache-curadoria"
   }
-]
+];
