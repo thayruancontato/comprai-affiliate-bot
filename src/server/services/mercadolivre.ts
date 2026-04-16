@@ -71,17 +71,17 @@ export async function searchProducts(query: string, limit = 5) {
   try {
     const workerUrl = `${CF_WORKER_URL}/scrape?q=${encodeURIComponent(query)}`;
     console.log('[ML API] Tentando via Cloudflare Worker:', workerUrl);
-    const rs = await fetch(workerUrl, { signal: AbortSignal.timeout(10000) });
+    const rs = await fetch(workerUrl);
     if (!rs.ok) throw new Error(`Worker HTTP ${rs.status}`);
     const html = await rs.text();
     const items = parseMLHtml(html, limit);
-    if (items.length > 0) {
+    if (items && items.length > 0) {
       console.log(`[ML API] Worker Scrape extraiu ${items.length} itens!`);
       return items;
     }
-    throw new Error('Worker retornou HTML sem produtos (captcha?)');
+    throw new Error('Worker retornou HTML sem produtos (captcha/bloqueio)');
   } catch (err: any) {
-    console.warn('[ML API] Worker falhou:', err.message);
+    console.warn('[ML API] Camada 1 (Worker) falhou:', err.message);
   }
 
   // CAMADA 2: Scraping direto (pode ser bloqueado no Render)
@@ -91,19 +91,18 @@ export async function searchProducts(query: string, limit = 5) {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
         'Accept-Language': 'pt-BR,pt;q=0.9'
-      },
-      signal: AbortSignal.timeout(8000)
+      }
     });
     if (!rs.ok) throw new Error(`HTTP ${rs.status}`);
     const html = await rs.text();
     const items = parseMLHtml(html, limit);
-    if (items.length > 0) {
+    if (items && items.length > 0) {
       console.log(`[ML API] Scrape direto extraiu ${items.length} itens.`);
       return items;
     }
-    throw new Error('Scrape direto sem produtos');
+    throw new Error('Scrape direto retornou lista vazia (captcha/bloqueio)');
   } catch (err: any) {
-    console.warn('[ML API] Scrape direto falhou:', err.message);
+    console.warn('[ML API] Camada 2 (Direto) falhou:', err.message);
   }
 
   // CAMADA 3: Cache local curadoria (garantido)
