@@ -145,13 +145,28 @@ app.post('/test-post', async (req, res) => {
   }
 });
 
-// DESCOBERTA DE OFERTAS ALEATÓRIAS
+// DISCOVERY ENDPOINT
 app.get('/api/discover', async (req, res) => {
   try {
     const products = await getRandomProducts();
     res.json({ products });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/debug-html', async (req, res) => {
+  try {
+    const rs = await fetch('https://lista.mercadolivre.com.br/iphone', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'pt-BR,pt;q=0.9'
+      }
+    });
+    const html = await rs.text();
+    res.send(html.substring(0, 5000));
+  } catch (error: any) {
+    res.status(500).send(error.message);
   }
 });
 
