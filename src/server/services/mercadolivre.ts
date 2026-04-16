@@ -5,6 +5,7 @@ import * as path from 'path';
 const ML_APP_ID = process.env.ML_APP_ID || '';
 const ML_SECRET_KEY = process.env.ML_SECRET_KEY || '';
 const TRACKING_ID = process.env.ML_AFFILIATE_TRACKING_ID || '';
+const CF_WORKER_URL = process.env.CF_WORKER_URL || 'https://compraki-ml-bridge.thayrufino2.workers.dev';
 
 const DISCOVERY_TERMS = [
   'ofertas do dia',
@@ -66,81 +67,83 @@ export async function getRandomProducts() {
 
 export async function searchProducts(query: string, limit = 5) {
   console.log(`[ML API] Buscando: "${query}" (limite: ${limit})...`);
-  
-  const token = await getMLToken();
-  
-  // Tenta busca via API Oficial primeiro (se tiver token)
-  if (token) {
-    try {
-      const resp = await fetch(`https://api.mercadolibre.com/sites/MLB/search?q=${encodeURIComponent(query)}&limit=${limit}`, {
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-      });
 
-      if (resp.ok) {
-        const data: any = await resp.json();
-        return (data.results || []).map(formatMLItem);
-      }
-      console.warn(`[ML API] API Oficial falhou (Status ${resp.status}). Tentando Fallback scraper...`);
-    } catch (err) {
-      console.warn('[ML API] Erro na API Oficial, pulando para fallback.');
+  // CAMADA 1: Cloudflare Worker como proxy de scraping (IPs do Worker não são bloqueados)
+  try {
+    const workerUrl = `${CF_WORKER_URL}/scrape?q=${encodeURIComponent(query)}`;
+    console.log('[ML API] Tentando via Cloudflare Worker:', workerUrl);
+    const rs = await fetch(workerUrl, { signal: AbortSignal.timeout(10000) });
+    if (!rs.ok) throw new Error(`Worker HTTP ${rs.status}`);
+    const html = await rs.text();
+    const items = parseMLHtml(html, limit);
+    if (items.length > 0) {
+      console.log(`[ML API] Worker Scrape extraiu ${items.length} itens!`);
+      return items;
     }
+    throw new Error('Worker retornou HTML sem produtos (captcha?)');
+  } catch (err: any) {
+    console.warn('[ML API] Worker falhou:', err.message);
   }
 
-  // FALLBACK: Scratching HTML DOM Frontend Público
+  // CAMADA 2: Scraping direto (pode ser bloqueado no Render)
   try {
     const publicUrl = `https://lista.mercadolivre.com.br/${encodeURIComponent(query)}`;
     const rs = await fetch(publicUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
         'Accept-Language': 'pt-BR,pt;q=0.9'
-      }
+      },
+      signal: AbortSignal.timeout(8000)
     });
-    
     if (!rs.ok) throw new Error(`HTTP ${rs.status}`);
-    
     const html = await rs.text();
-    const $ = cheerio.load(html);
-    
-    const items: any[] = [];
-    $('.poly-card').each((_, el) => {
-      if (items.length >= limit) return false; // break loop
-      
-      const titleEl = $(el).find('.poly-component__title');
-      const title = titleEl.text();
-      const link = titleEl.attr('href') || $(el).find('a').attr('href');
-      
-      const currentPriceText = $(el).find('.poly-price__current .andes-money-amount__fraction').first().text();
-      const oldPriceText = $(el).find('.poly-price__strike .andes-money-amount__fraction').first().text();
-      let thumb = $(el).find('img').attr('data-src') || $(el).find('img').attr('src');
-      
-      if (title && currentPriceText) {
-        items.push({ 
-           id: link?.split('/')[3] || String(Date.now()), // Mock ID for frontend
-           title: title, 
-           price: parseFloat(currentPriceText.replace(/\./g, '')),
-           original_price: oldPriceText ? parseFloat(oldPriceText.replace(/\./g, '')) : parseFloat(currentPriceText.replace(/\./g, '')),
-           permalink: appendTrackingId(link || ''), 
-           thumbnail: thumb?.replace('I.jpg', 'O.jpg') || '',
-           free_shipping: $(el).text().toLowerCase().includes('frete grátis')
-        });
-      }
-    });
-
-    console.log(`[ML API] Fallback HTML extraiu ${items.length} itens.`);
-    if (items.length === 0) throw new Error('Nenhum item extraido (possivel captcha)');
-    return items;
+    const items = parseMLHtml(html, limit);
+    if (items.length > 0) {
+      console.log(`[ML API] Scrape direto extraiu ${items.length} itens.`);
+      return items;
+    }
+    throw new Error('Scrape direto sem produtos');
   } catch (err: any) {
-    console.error('[ML API] Fallback HTML também falhou:', err.message);
-    return await getLocalFallbackProducts(limit);
+    console.warn('[ML API] Scrape direto falhou:', err.message);
   }
+
+  // CAMADA 3: Cache local curadoria (garantido)
+  console.log('[ML API] Usando curadoria local como última linha de defesa...');
+  return await getLocalFallbackProducts(limit);
+}
+
+function parseMLHtml(html: string, limit: number): any[] {
+  const $ = cheerio.load(html);
+  const items: any[] = [];
+  $('.poly-card').each((_, el) => {
+    if (items.length >= limit) return false;
+    const titleEl = $(el).find('.poly-component__title');
+    const title = titleEl.text().trim();
+    const link = titleEl.attr('href') || $(el).find('a').first().attr('href');
+    const currentPriceText = $(el).find('.poly-price__current .andes-money-amount__fraction').first().text();
+    const oldPriceText = $(el).find('.poly-price__strike .andes-money-amount__fraction').first().text();
+    const thumb = $(el).find('img').attr('data-src') || $(el).find('img').attr('src');
+    if (title && currentPriceText) {
+      items.push({
+        id: link?.split('/')[3] || String(Date.now()),
+        title,
+        price: parseFloat(currentPriceText.replace(/\./g, '').replace(',', '.')),
+        original_price: oldPriceText
+          ? parseFloat(oldPriceText.replace(/\./g, '').replace(',', '.'))
+          : parseFloat(currentPriceText.replace(/\./g, '').replace(',', '.')),
+        permalink: appendTrackingId(link || ''),
+        thumbnail: (thumb || '').replace('I.jpg', 'O.jpg'),
+        free_shipping: $(el).text().toLowerCase().includes('frete grátis')
+      });
+    }
+  });
+  return items;
 }
 
 async function getLocalFallbackProducts(limit: number) {
   try {
-    const fallbackPath = path.join(__dirname, '../fallback_products.json');
+    // process.cwd() aponta para a raiz do projeto tanto localmente quanto no Render
+    const fallbackPath = path.join(process.cwd(), 'src/server/fallback_products.json');
     const data = await fs.promises.readFile(fallbackPath, 'utf8');
     const products = JSON.parse(data);
     
