@@ -47,9 +47,8 @@ function App() {
   const [discoveredProducts, setDiscoveredProducts] = useState<Product[]>([]);
   const [selectedGroup, setSelectedGroup] = useState('');
   const [loading, setLoading] = useState(false);
-  const [restarting, setRestarting] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [pairing, setPairing] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Tudo');
 
